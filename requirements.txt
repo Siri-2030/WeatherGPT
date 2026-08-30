@@ -1,0 +1,48 @@
+# ==============================================================================
+# WeatherGPT - Requirements (100% Free / Open Source)
+# ==============================================================================
+
+# --- Backend framework ---
+fastapi==0.115.0
+uvicorn[standard]==0.30.6
+pydantic==2.9.2
+python-dotenv==1.0.1
+
+# --- Data ingestion (Open-Meteo GFS/NWP API) ---
+openmeteo-requests==1.3.0
+requests-cache==1.2.1
+retry-requests==2.0.0
+requests==2.32.3
+pandas==2.2.3
+
+# --- Geocoding (free, OpenStreetMap Nominatim) ---
+geopy==2.4.1
+
+# --- LLM Orchestration ---
+langchain==0.3.7
+langchain-google-genai==2.0.4     # Google Gemini free tier
+langchain-community==0.3.5        # Ollama + community tools
+ollama==0.3.3                     # local open-weight LLM fallback (Llama3, Mistral, etc.)
+
+# --- Frontend UI ---
+streamlit==1.39.0
+streamlit-folium==0.23.1
+folium==0.17.0
+
+# --- Module 8: Voice Interaction & Audio Processing (100% free/open-source) ---
+openai-whisper==20240930   # local CPU speech-to-text (primary STT engine)
+SpeechRecognition==3.10.4  # fallback STT (free, keyless Google Web Speech)
+gTTS==2.5.3                # free Google Text-to-Speech (primary TTS engine)
+pyttsx3==2.90               # fully offline TTS fallback (no internet needed)
+pydub==0.25.1               # audio format conversion (webm/ogg/mp3 -> wav)
+streamlit-mic-recorder==0.0.8  # browser mic capture widget for Streamlit
+# NOTE: openai-whisper and pydub both require the `ffmpeg` system binary.
+# It is installed via apt-get in Dockerfile/Dockerfile.frontend -- if running
+# locally without Docker, install it yourself:
+#   Ubuntu/Debian: sudo apt-get install ffmpeg
+#   macOS:         brew install ffmpeg
+#   Windows:        choco install ffmpeg   (or download from ffmpeg.org)
+
+# --- Utilities ---
+numpy==1.26.4
+tenacity==9.0.0

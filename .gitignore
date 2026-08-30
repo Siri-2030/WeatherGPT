@@ -1,0 +1,19 @@
+.venv/
+__pycache__/
+*.py[cod]
+.env
+*.sqlite
+*.sqlite3
+test_audio.wav
+*.mp3
+*.wav
+*.webm
+*.ogg
+*.log
+.pytest_cache/
+.DS_Store
+
+# Local backup copies
+wrf_simulator_backup.py
+wrf_simulator_before_date_fix.py
+wrf_simulator_before_timezone_fix.py

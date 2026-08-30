@@ -1,0 +1,65 @@
+version: "3.9"
+
+# ==============================================================================
+# WeatherGPT - docker-compose
+# Brings up the FastAPI backend and Streamlit frontend together.
+# Usage:
+#   1. cp .env.example .env   (fill in GOOGLE_API_KEY or set LLM_PROVIDER=ollama)
+#   2. docker compose up --build
+#   3. Open http://localhost:8501
+# ==============================================================================
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: weathergpt-backend
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:8000/health').raise_for_status()"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    networks:
+      - weathergpt-net
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    container_name: weathergpt-frontend
+    ports:
+      - "8501:8501"
+    environment:
+      - BACKEND_URL=http://backend:8000
+    depends_on:
+      - backend
+    restart: unless-stopped
+    networks:
+      - weathergpt-net
+
+  # Optional: fully free, fully offline local LLM (no API key needed).
+  # Uncomment to run Llama3/Mistral locally instead of Gemini.
+  # Set LLM_PROVIDER=ollama and OLLAMA_BASE_URL=http://ollama:11434 in .env.
+  # ollama:
+  #   image: ollama/ollama:latest
+  #   container_name: weathergpt-ollama
+  #   ports:
+  #     - "11434:11434"
+  #   volumes:
+  #     - ollama_data:/root/.ollama
+  #   networks:
+  #     - weathergpt-net
+
+networks:
+  weathergpt-net:
+    driver: bridge
+
+# volumes:
+#   ollama_data:
