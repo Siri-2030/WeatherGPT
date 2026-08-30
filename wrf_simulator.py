@@ -180,17 +180,74 @@ class NWPFetchError(Exception):
 # ------------------------------------------------------------------------------
 # Geocoding
 # ------------------------------------------------------------------------------
+# ------------------------------------------------------------------------------
+# Geocoding
+# ------------------------------------------------------------------------------
+# Built-in coordinates for frequently used locations.
+# This avoids unnecessary calls to the public Nominatim service.
+_LOCATION_CACHE = {
+    "vijayawada": GeoLocation(
+        query="Vijayawada",
+        lat=16.5062,
+        lon=80.6480,
+        display_name="Vijayawada, Andhra Pradesh, India",
+        country="India",
+        state="Andhra Pradesh",
+    ),
+    "vijayawada, andhra pradesh": GeoLocation(
+        query="Vijayawada, Andhra Pradesh",
+        lat=16.5062,
+        lon=80.6480,
+        display_name="Vijayawada, Andhra Pradesh, India",
+        country="India",
+        state="Andhra Pradesh",
+    ),
+}
+
+
 def geocode_location(place_name: str) -> GeoLocation:
     """
-    Convert a free-text place name into coordinates using
-    OpenStreetMap Nominatim geocoding.
+    Convert a free-text place name into coordinates.
 
-    HPC-UPGRADE-PATH:
-    WRF also needs a latitude/longitude center point to build
-    the computational domain using WPS/geogrid.
+    Frequently used locations are resolved locally first.
+    Other locations fall back to OpenStreetMap Nominatim.
+
+    This reduces the risk of HTTP 429 rate-limit errors from
+    the public Nominatim service on cloud hosting platforms.
     """
 
+    normalized = " ".join(
+        place_name.strip().lower().split()
+    )
+
+    # --------------------------------------------------------------------------
+    # LOCAL LOCATION CACHE
+    # --------------------------------------------------------------------------
+
+    if normalized in _LOCATION_CACHE:
+
+        cached = _LOCATION_CACHE[normalized]
+
+        logger.info(
+            "Using cached coordinates for location: %s",
+            place_name,
+        )
+
+        return GeoLocation(
+            query=place_name,
+            lat=cached.lat,
+            lon=cached.lon,
+            display_name=cached.display_name,
+            country=cached.country,
+            state=cached.state,
+        )
+
+    # --------------------------------------------------------------------------
+    # Nominatim fallback
+    # --------------------------------------------------------------------------
+
     try:
+
         location = _geolocator.geocode(
             place_name,
             exactly_one=True,
@@ -208,13 +265,17 @@ def geocode_location(place_name: str) -> GeoLocation:
         ) from exc
 
     if location is None:
+
         raise GeocodingError(
             f"Could not resolve location: '{place_name}'"
         )
 
-    addr = location.raw.get("address", {})
+    addr = location.raw.get(
+        "address",
+        {},
+    )
 
-    return GeoLocation(
+    result = GeoLocation(
         query=place_name,
         lat=round(location.latitude, 4),
         lon=round(location.longitude, 4),
@@ -222,6 +283,14 @@ def geocode_location(place_name: str) -> GeoLocation:
         country=addr.get("country"),
         state=addr.get("state"),
     )
+
+    # --------------------------------------------------------------------------
+    # Cache successful geocoding result for this process
+    # --------------------------------------------------------------------------
+
+    _LOCATION_CACHE[normalized] = result
+
+    return result
 
 
 # ------------------------------------------------------------------------------

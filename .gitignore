@@ -17,3 +17,6 @@ test_audio.wav
 wrf_simulator_backup.py
 wrf_simulator_before_date_fix.py
 wrf_simulator_before_timezone_fix.py
+
+wrf_simulator_before_geocoding_fix.py
+.weathergpt_cache/
