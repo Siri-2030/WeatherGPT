@@ -40,9 +40,10 @@ from typing import Any, Optional
 import openmeteo_requests
 import pandas as pd
 import requests_cache
-from geopy.geocoders import Nominatim
-from geopy.exc import GeocoderServiceError, GeocoderTimedOut
+#from geopy.geocoders import Nominatim
+#from geopy.exc import GeocoderServiceError, GeocoderTimedOut
 from retry_requests import retry
+import requests
 
 
 logger = logging.getLogger("weathergpt.wrf_simulator")
@@ -68,12 +69,14 @@ _openmeteo = openmeteo_requests.Client(
 )
 
 
-# ------------------------------------------------------------------------------
-# Free geocoder
-# ------------------------------------------------------------------------------
-_geolocator = Nominatim(
-    user_agent="weathergpt_sih_hackathon_app"
-)
+# --------------------------------------------------------------------------
+# Global geocoder
+# --------------------------------------------------------------------------
+# Open-Meteo Geocoding API provides worldwide location search.
+# It avoids relying on the public Nominatim service, which can return
+# HTTP 429 rate-limit errors on cloud-hosted applications.
+
+GEOCODING_URL = "https://geocoding-api.open-meteo.com/v1/search"
 
 
 OPEN_METEO_FORECAST_URL = (
@@ -116,8 +119,8 @@ DAILY_VARS = [
     "wind_speed_10m_max",
     "wind_gusts_10m_max",
     "uv_index_max",
-    "sunrise",
-    "sunset",
+    #"sunrise",
+    #"sunset",
 ]
 
 
@@ -207,18 +210,19 @@ _LOCATION_CACHE = {
 
 def geocode_location(place_name: str) -> GeoLocation:
     """
-    Convert a free-text place name into coordinates.
+    Convert a free-text place name into coordinates using the
+    Open-Meteo Geocoding API.
 
-    Frequently used locations are resolved locally first.
-    Other locations fall back to OpenStreetMap Nominatim.
-
-    This reduces the risk of HTTP 429 rate-limit errors from
-    the public Nominatim service on cloud hosting platforms.
+    Supports locations worldwide and avoids relying on the
+    public OpenStreetMap Nominatim service.
     """
 
     normalized = " ".join(
         place_name.strip().lower().split()
     )
+
+    if not normalized:
+        raise GeocodingError("Location name cannot be empty.")
 
     # --------------------------------------------------------------------------
     # LOCAL LOCATION CACHE
@@ -243,55 +247,98 @@ def geocode_location(place_name: str) -> GeoLocation:
         )
 
     # --------------------------------------------------------------------------
-    # Nominatim fallback
+    # OPEN-METEO GEOCODING
     # --------------------------------------------------------------------------
 
     try:
 
-        location = _geolocator.geocode(
-            place_name,
-            exactly_one=True,
-            addressdetails=True,
+        response = requests.get(
+            GEOCODING_URL,
+            params={
+                "name": place_name,
+                "count": 5,
+                "language": "en",
+                "format": "json",
+            },
             timeout=10,
         )
 
-    except (
-        GeocoderTimedOut,
-        GeocoderServiceError,
-    ) as exc:
+        response.raise_for_status()
+
+        data = response.json()
+
+    except requests.RequestException as exc:
 
         raise GeocodingError(
             f"Geocoding service unavailable: {exc}"
         ) from exc
 
-    if location is None:
+    # --------------------------------------------------------------------------
+    # CHECK RESULTS
+    # --------------------------------------------------------------------------
+
+    results = data.get("results") or []
+
+    if not results:
 
         raise GeocodingError(
             f"Could not resolve location: '{place_name}'"
         )
 
-    addr = location.raw.get(
-        "address",
-        {},
-    )
+    # Use the first Open-Meteo result.
+    location = results[0]
+
+    latitude = location.get("latitude")
+    longitude = location.get("longitude")
+
+    if latitude is None or longitude is None:
+
+        raise GeocodingError(
+            f"Geocoding returned incomplete coordinates for '{place_name}'"
+        )
+
+    # --------------------------------------------------------------------------
+    # BUILD DISPLAY NAME
+    # --------------------------------------------------------------------------
+
+    name = location.get("name") or place_name
+    admin1 = location.get("admin1")
+    country = location.get("country")
+
+    display_parts = [name]
+
+    if admin1 and admin1.lower() != name.lower():
+        display_parts.append(admin1)
+
+    if country:
+        display_parts.append(country)
+
+    display_name = ", ".join(display_parts)
 
     result = GeoLocation(
         query=place_name,
-        lat=round(location.latitude, 4),
-        lon=round(location.longitude, 4),
-        display_name=location.address,
-        country=addr.get("country"),
-        state=addr.get("state"),
+        lat=round(float(latitude), 4),
+        lon=round(float(longitude), 4),
+        display_name=display_name,
+        country=country,
+        state=admin1,
     )
 
     # --------------------------------------------------------------------------
-    # Cache successful geocoding result for this process
+    # CACHE SUCCESSFUL RESULT
     # --------------------------------------------------------------------------
 
     _LOCATION_CACHE[normalized] = result
 
-    return result
+    logger.info(
+        "Geocoded '%s' -> %s (%s, %s)",
+        place_name,
+        display_name,
+        result.lat,
+        result.lon,
+    )
 
+    return result
 
 # ------------------------------------------------------------------------------
 # Alert extraction
@@ -672,25 +719,35 @@ def fetch_nwp_data(
     # Determine the timezone returned by Open-Meteo.
     # --------------------------------------------------------------------------
     try:
-
         api_timezone = response.Timezone()
 
+    # Open-Meteo may return the timezone as bytes, e.g.
+    # b'Europe/London'. Decode it before using it with pandas.
+        if isinstance(api_timezone, bytes):
+            api_timezone = api_timezone.decode("utf-8")
+
+        api_timezone = str(api_timezone)
+
         daily_time = daily_time_utc.tz_convert(
-            str(api_timezone)
-        )
+            api_timezone
+    )
+
+        logger.info(
+            "Using API timezone: %s",
+            api_timezone,
+    )
 
     except Exception as exc:
 
-        logger.warning(
+         logger.warning(
             "Could not determine API timezone (%s). "
-            "Using Asia/Kolkata as fallback.",
-            exc,
-        )
+            "Using UTC as fallback.",
+             exc,
+    )
 
-        daily_time = daily_time_utc.tz_convert(
-            "Asia/Kolkata"
-        )
-
+         daily_time = daily_time_utc.tz_convert(
+            "UTC"
+    )
 
     # --------------------------------------------------------------------------
     # Build daily records
