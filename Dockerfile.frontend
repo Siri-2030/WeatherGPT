@@ -1,40 +1,34 @@
 # ==============================================================================
 # WeatherGPT - Frontend (Streamlit) Dockerfile
 # ==============================================================================
-FROM python:3.11-slim AS builder
 
-WORKDIR /build
-# gcc: needed for some scientific-python wheels
-# ffmpeg: required by openai-whisper (audio decoding) and pydub (format conversion)
-RUN apt-get update && apt-get install -y --no-install-recommends gcc ffmpeg \
-    && rm -rf /var/lib/apt/lists/*
+FROM python:3.11-slim
 
-COPY requirements.txt .
-RUN pip install --no-cache-dir --user -r requirements.txt
-
-FROM python:3.11-slim AS runtime
 WORKDIR /app
 
-# ffmpeg is also needed at RUNTIME (not just build time) for Whisper/pydub
-RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg \
+# FFmpeg is required by Whisper and pydub
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc \
+    ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
-COPY --from=builder /root/.local /root/.local
-ENV PATH=/root/.local/bin:$PATH
+# Install Python dependencies system-wide so the non-root app user
+# can execute Streamlit and import all packages.
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
 
+# Copy application files
 COPY app.py voice_engine.py ./
 COPY .streamlit ./.streamlit
 
-# Pre-download the Whisper "base" model at build time so the first user
-# request isn't slowed down by a cold model download (comment out to keep
-# image smaller / defer download to first use).
-ENV WHISPER_MODEL_SIZE=base
-RUN python -c "import whisper; whisper.load_model('base')" || true
+# Create non-root application user
+RUN useradd --create-home --shell /bin/bash appuser \
+    && chown -R appuser:appuser /app
 
-RUN useradd --create-home appuser
 USER appuser
 
 ENV PYTHONUNBUFFERED=1
+
 EXPOSE 8501
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s \
