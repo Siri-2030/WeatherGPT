@@ -66,15 +66,24 @@ WHISPER_MODEL_SIZE = os.getenv("WHISPER_MODEL_SIZE", "small")
 # ------------------------------------------------------------------------------
 # Explicitly configure FFmpeg so Whisper and pydub can find it even when
 # Streamlit is launched from a process that does not inherit the updated PATH.
-FFMPEG_BIN = r"D:\ffmpeg-n8.1-latest-win64-gpl-8.1\bin\ffmpeg.exe"
-FFPROBE_BIN = r"D:\ffmpeg-n8.1-latest-win64-gpl-8.1\bin\ffprobe.exe"
+# ------------------------------------------------------------------------------
+# FFmpeg configuration
+# ------------------------------------------------------------------------------
+# Use the FFmpeg binaries available on the current operating system.
+#
+# Local Windows:
+#   Uses ffmpeg/ffprobe from PATH if installed.
+#
+# Render/Linux Docker:
+#   Dockerfile.frontend installs ffmpeg using apt-get, so it is available
+#   through PATH.
 
-if os.path.isfile(FFMPEG_BIN):
-    os.environ["PATH"] = (
-        os.path.dirname(FFMPEG_BIN)
-        + os.pathsep
-        + os.environ.get("PATH", "")
-    )
+import shutil
+
+FFMPEG_BIN = os.getenv("FFMPEG_BIN") or shutil.which("ffmpeg")
+
+FFPROBE_BIN = os.getenv("FFPROBE_BIN") or shutil.which("ffprobe")
+
 @dataclass
 class TranscriptionResult:
     text: str
