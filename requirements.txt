@@ -30,7 +30,7 @@ streamlit-folium==0.23.1
 folium==0.17.0
 
 # --- Module 8: Voice Interaction & Audio Processing (100% free/open-source) ---
-openai-whisper==20240930   # local CPU speech-to-text (primary STT engine)
+#openai-whisper==20240930   # local CPU speech-to-text (primary STT engine)
 SpeechRecognition==3.10.4  # fallback STT (free, keyless Google Web Speech)
 gTTS==2.5.3                # free Google Text-to-Speech (primary TTS engine)
 pyttsx3==2.90               # fully offline TTS fallback (no internet needed)
