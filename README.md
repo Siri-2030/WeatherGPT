@@ -102,7 +102,7 @@ See `DEPLOYMENT.md` for full local, Docker, and free-cloud deployment steps.
 - Requires the `ffmpeg` system binary (already included in the Docker
   images; install locally via `apt-get install ffmpeg` / `brew install ffmpeg`).
 
-## Known limitations (be upfront with judges)
+## Known limitations
 
 - Not running an actual compiled WRF simulation (see explanation above) —
   data is real NOAA GFS model output via Open-Meteo, not a locally-run
