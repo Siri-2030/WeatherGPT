@@ -289,6 +289,58 @@ def get_llm():
     return _llm_client
 
 
+
+# ------------------------------------------------------------------------------
+# Small helpers
+# ------------------------------------------------------------------------------
+
+def llm_info() -> dict[str, str]:
+    """Non-secret description of the active LLM setup (shown in /health)."""
+    if LLM_PROVIDER == "ollama":
+        return {"provider": "ollama", "model": OLLAMA_MODEL}
+    if LLM_PROVIDER == "gemini":
+        return {"provider": "gemini", "model": GEMINI_MODEL}
+    fallback = GEMINI_MODEL if os.getenv("GOOGLE_API_KEY") else "none"
+    return {"provider": "groq", "model": GROQ_MODEL, "fallback": fallback}
+
+
+def _content_to_text(content: Any) -> str:
+    """LangChain message content may be a str or a list of content blocks."""
+    if isinstance(content, str):
+        text = content
+    elif isinstance(content, list):
+        parts = []
+        for block in content:
+            if isinstance(block, str):
+                parts.append(block)
+            elif isinstance(block, dict) and block.get("type", "text") == "text":
+                parts.append(str(block.get("text", "")))
+        text = "".join(parts)
+    else:
+        text = str(content)
+    # Some reasoning models wrap their thoughts in <think> ... </think>
+    return re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL | re.IGNORECASE).strip()
+
+
+def _extract_json_object(text: str) -> dict[str, Any]:
+    """Pull the first {...} object out of an LLM reply (tolerates fences/prose)."""
+    text = re.sub(r"^```(?:json)?\s*|\s*```$", "", text.strip(), flags=re.IGNORECASE)
+    start, end = text.find("{"), text.rfind("}")
+    if start == -1 or end <= start:
+        raise ValueError(f"No JSON object found in LLM reply: {text[:120]!r}")
+    return json.loads(text[start:end + 1])
+
+
+def _format_history(history: Optional[list[dict[str, str]]]) -> str:
+    lines = []
+    for turn in (history or [])[-6:]:
+        role = turn.get("role")
+        content = (turn.get("content") or "").strip().replace("\n", " ")
+        if role in ("user", "assistant") and content:
+            lines.append(f"{role}: {content[:300]}")
+    return "\n".join(lines) or "(none)"
+
+
 # ==============================================================================
 # STEP 1: INTENT + LOCATION EXTRACTION
 # ==============================================================================
@@ -310,12 +362,20 @@ Required JSON format:
 
 {{"location": "<place name or null>", "forecast_days": <int>, "needs_weather_data": <true/false>}}
 
+If the user's message names no place but the earlier conversation does (for
+example the user now asks "and tomorrow?"), reuse the most recent place from
+the conversation. Use null only if no place can be found anywhere.
+Write the location in English, e.g. "Chennai" or "Shimla, Himachal Pradesh".
+
 Set "needs_weather_data" to false ONLY if the user is asking something
 entirely unrelated to weather, such as:
 - "who are you?"
 - "what can you do?"
 
 Otherwise set it to true.
+
+Earlier conversation (may be empty):
+{history}
 
 User message:
 {query}
@@ -326,7 +386,10 @@ User message:
 # Intent classifier
 # ------------------------------------------------------------------------------
 
-def classify_intent(user_query: str) -> dict[str, Any]:
+def classify_intent(
+    user_query: str,
+    history: Optional[list[dict[str, str]]] = None,
+) -> dict[str, Any]:
     """
     Extract:
         - location
@@ -349,40 +412,16 @@ def classify_intent(user_query: str) -> dict[str, Any]:
 
         resp = llm.invoke(
             _LOCATION_EXTRACTION_PROMPT.format(
-                query=user_query
+                query=user_query,
+                history=_format_history(history),
             )
         )
 
-        text = (
-            resp.content
-            if hasattr(resp, "content")
-            else str(resp)
+        text = _content_to_text(
+            resp.content if hasattr(resp, "content") else resp
         )
 
-        # ----------------------------------------------------------------------
-        # Remove markdown code fences if model returns them
-        # ----------------------------------------------------------------------
-
-        text = re.sub(
-            r"^```(?:json)?\s*",
-            "",
-            text.strip(),
-            flags=re.IGNORECASE,
-        )
-
-        text = re.sub(
-            r"\s*```$",
-            "",
-            text.strip(),
-        )
-
-        text = text.strip()
-
-        # ----------------------------------------------------------------------
-        # Parse JSON
-        # ----------------------------------------------------------------------
-
-        parsed = json.loads(text)
+        parsed = _extract_json_object(text)
 
         # ----------------------------------------------------------------------
         # Apply safe defaults
@@ -402,8 +441,11 @@ def classify_intent(user_query: str) -> dict[str, Any]:
         # Make sure location key exists
         # ----------------------------------------------------------------------
 
-        if "location" not in parsed:
+        loc = parsed.get("location")
+        if not isinstance(loc, str) or loc.strip().lower() in ("", "null", "none", "n/a", "unknown"):
             parsed["location"] = None
+        else:
+            parsed["location"] = loc.strip()
 
         # ----------------------------------------------------------------------
         # Correct relative forecast terms
@@ -480,6 +522,7 @@ def handle_chat_query(
     user_query: str,
     default_location: Optional[str] = None,
     persona_override: Optional[str] = None,
+    history: Optional[list[dict[str, str]]] = None,
 ) -> dict[str, Any]:
     """
     Full end-to-end WeatherGPT pipeline.
@@ -507,7 +550,7 @@ def handle_chat_query(
     # STEP 1: Intent classification
     # --------------------------------------------------------------------------
 
-    intent = classify_intent(user_query)
+    intent = classify_intent(user_query, history)
 
     logger.info(
         "Classified intent: %s",
@@ -578,12 +621,15 @@ def handle_chat_query(
                 forecast_days,
             )
 
+            # Always fetch the full 7 days so the dashboard charts are complete;
+            # the LLM is told which horizon the user actually asked about.
             result = fetch_nwp_data(
                 location_query,
-                forecast_days=forecast_days,
+                forecast_days=7,
             )
 
             nwp_data = result.to_dict()
+            nwp_data["requested_forecast_days"] = forecast_days
 
         except GeocodingError as exc:
 
@@ -642,6 +688,7 @@ def handle_chat_query(
         user_query,
         nwp_data or {},
         persona=persona,
+        history=history,
     )
 
     # --------------------------------------------------------------------------
@@ -649,6 +696,7 @@ def handle_chat_query(
     # --------------------------------------------------------------------------
 
     llm = get_llm()
+    llm_error: Optional[str] = None
 
     # --------------------------------------------------------------------------
     # STEP 6: Generate final answer
@@ -660,11 +708,14 @@ def handle_chat_query(
             messages
         )
 
-        answer_text = (
+        answer_text = _content_to_text(
             response.content
             if hasattr(response, "content")
-            else str(response)
+            else response
         )
+
+        if not answer_text:
+            raise ValueError("The language model returned an empty answer.")
 
     except Exception as exc:
 
@@ -678,6 +729,8 @@ def handle_chat_query(
             f"Details: {exc}"
         )
 
+        llm_error = f"LLM generation failed: {exc}"
+
     # --------------------------------------------------------------------------
     # STEP 7: Return final structured response
     # --------------------------------------------------------------------------
@@ -687,7 +740,7 @@ def handle_chat_query(
         "location_used": location_query,
         "nwp_data": nwp_data,
         "persona": persona,
-        "error": None,
+        "error": llm_error,
     }
 
 
