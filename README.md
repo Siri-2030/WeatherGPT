@@ -87,9 +87,12 @@ python -m unittest discover -s tests -v
 python smoke_test.py            # backend must be running
 ```
 
+
 ## Data sources (all free)
 Open-Meteo Forecast (NOAA GFS) · Open-Meteo Geocoding · Open-Meteo Air Quality ·
 Groq / Google Gemini / Ollama (LLM) · Whisper / Google Web Speech (STT) · gTTS (TTS).
+
+## Known limitations
 
 > ⚠️ Alerts are simplified demo thresholds, **not** official warnings. Follow IMD
 > advisories in a real emergency.
