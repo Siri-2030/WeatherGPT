@@ -10,11 +10,11 @@ Two services must both be live and **connected**:
 ```
 
 ---
-## 1. Run locally in VS Code (do this first)
+## 1. To Run locally in VS Code 
 
 ```powershell
 cd D:\SIH\weathergpt
-python -m venv .venv                  # use a FRESH venv; the old one has conflicting packages
+python -m venv .venv                  # using a FRESH venv;
 .venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
 pip install -r requirements.txt
@@ -26,11 +26,11 @@ Terminal 1: `uvicorn main:app --reload --port 8000`  → check http://localhost:
 Terminal 2: `streamlit run app.py` → http://localhost:8501
 Terminal 3 (optional): `python smoke_test.py`
 
-**FFmpeg (needed only for voice):** `winget install Gyan.FFmpeg`, then **restart VS Code** so PATH updates.
+**FFmpeg (needed only for voice):** `winget install Gyan.FFmpeg`, then **restart VS Code** so PATH will stay updated.
 `ffmpeg -version` must work in the VS Code terminal.
 
 ---
-## 2. Run both with Docker
+## 2. Running both with Docker
 ```powershell
 copy .env.example .env     # fill keys
 docker compose up --build
@@ -61,16 +61,16 @@ Also open `/docs` to try `/weather` and `/chat` by hand.
 | Dockerfile Path | `./Dockerfile.frontend` |
 | Environment | `BACKEND_URL=https://<backend>.onrender.com`  (https, **no trailing slash**, not localhost) |
 
-Use **Manual Deploy → Clear build cache & deploy** for the frontend after pulling these fixes,
+For **Manual Deploy → Clear build cache & deploy** for the frontend after pulling these fixes,
 so the new `requirements-frontend.txt` is really installed.
 
-### 3c. Free-tier cold starts (important for demos)
+### 3c. Free-tier cold starts
 Render free services sleep after ~15 min idle and take ~30–60 s to wake.
-**10 minutes before the demo:** open the backend `/health` URL and the frontend URL, ask one question.
+**open the backend:**  `/health` URL and the frontend URL, ask one question.
 The UI also has a **⏰ Wake up backend** button, and `/chat` retries once while the backend wakes.
 
 ---
-## 4. Troubleshooting
+## 4. Troubleshooting/Possible error Fixes
 
 | Symptom | Cause | Fix |
 |---|---|---|
