@@ -24,3 +24,4 @@ test_audio.wav
 # Local backup copies of source files
 *_backup.py
 *_before_*.py
+DEMO_GUIDE.md
