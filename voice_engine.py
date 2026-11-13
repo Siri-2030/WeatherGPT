@@ -31,6 +31,7 @@ from __future__ import annotations
 import io
 import logging
 import os
+import re
 import tempfile
 from dataclasses import dataclass
 from typing import Optional
@@ -59,7 +60,9 @@ DEFAULT_LANGUAGE = "en"
 # Whisper model size -- "tiny" or "base" recommended for CPU/free-tier latency.
 # Override with env var WHISPER_MODEL_SIZE if you have more compute available
 # (e.g. "small" for better accuracy on Indian languages at the cost of speed).
-WHISPER_MODEL_SIZE = os.getenv("WHISPER_MODEL_SIZE", "small")
+# NOTE: openai-whisper is optional. If it is not installed (as on Render), the
+# app transparently falls back to SpeechRecognition + Google Web Speech.
+WHISPER_MODEL_SIZE = os.getenv("WHISPER_MODEL_SIZE", "base")
 
 # ------------------------------------------------------------------------------
 # FFmpeg configuration
@@ -215,28 +218,41 @@ def _transcribe_with_speech_recognition(
         except OSError:
             pass
 
-'''
 def _ensure_wav(audio_bytes: bytes, out_path: str) -> None:
-    """Convert arbitrary browser-captured audio (webm/ogg/mp3) to WAV via pydub/ffmpeg."""
-    from pydub import AudioSegment
-    segment = AudioSegment.from_file(io.BytesIO(audio_bytes))
-    segment.export(out_path, format="wav")
-'''
-def _ensure_wav(audio_bytes: bytes, out_path: str) -> None:
-    """Convert browser audio to WAV using the explicitly configured FFmpeg."""
+    """Convert browser audio (webm/ogg/mp3/wav) to WAV with pydub + FFmpeg."""
     from pydub import AudioSegment
 
-    if not os.path.isfile(FFMPEG_BIN):
+    # Only override pydub's defaults when we actually found the binaries; a None
+    # here used to crash with "TypeError: stat: path should be string...".
+    if FFMPEG_BIN:
+        AudioSegment.converter = FFMPEG_BIN
+        AudioSegment.ffmpeg = FFMPEG_BIN
+    if FFPROBE_BIN:
+        AudioSegment.ffprobe = FFPROBE_BIN
+    if not FFMPEG_BIN:
         raise FileNotFoundError(
-            f"FFmpeg executable not found at: {FFMPEG_BIN}"
+            "FFmpeg was not found on PATH. Install it (apt-get install ffmpeg / "
+            "choco install ffmpeg) or set the FFMPEG_BIN environment variable."
         )
 
-    AudioSegment.converter = FFMPEG_BIN
-    AudioSegment.ffmpeg = FFMPEG_BIN
-    AudioSegment.ffprobe = FFPROBE_BIN
-
     segment = AudioSegment.from_file(io.BytesIO(audio_bytes))
     segment.export(out_path, format="wav")
+
+
+def _clean_for_speech(text: str) -> str:
+    """Strip markdown/emoji noise so the TTS engine doesn't read symbols aloud."""
+    text = re.sub(r"```.*?```", " ", text, flags=re.DOTALL)
+    text = re.sub(r"[*_`#>|~]+", "", text)                      # markdown markers
+    text = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", text)         # [label](url) -> label
+    text = re.sub(r"^\s*[-•]\s+", "", text, flags=re.MULTILINE)  # bullet markers
+    text = re.sub(r"[\U0001F000-\U0001FAFF\u2600-\u27BF\uFE0F]", "", text)  # emoji
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def audio_mime(audio_bytes: bytes) -> str:
+    """MIME type for st.audio(): gTTS returns MP3, pyttsx3 returns WAV."""
+    return "audio/wav" if audio_bytes[:4] == b"RIFF" else "audio/mp3"
+
 
 # ------------------------------------------------------------------------------
 # TTS: generate_voice_response
@@ -254,11 +270,12 @@ def generate_voice_response(
             if unsupported.
 
     Returns:
-        (mp3_audio_bytes, None) on success,
+        (audio_bytes [MP3 from gTTS, WAV from pyttsx3], None) on success,
         (None, error_message) on failure -- caller should fall back to
         text-only display.
     """
-    if not text_response or not text_response.strip():
+    text_response = _clean_for_speech(text_response or "")
+    if not text_response:
         return None, "No text provided to synthesize."
 
     lang_info = SUPPORTED_VOICE_LANGUAGES.get(language_code, SUPPORTED_VOICE_LANGUAGES[DEFAULT_LANGUAGE])
@@ -299,7 +316,7 @@ def _synthesize_with_pyttsx3(text: str) -> tuple[Optional[bytes], Optional[str]]
     # voices installed (varies a lot by platform) -- this fallback is mainly
     # useful for English, fully-offline demos with no internet access.
     engine = pyttsx3.init()
-    with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tmp:
+    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
         tmp_path = tmp.name
     try:
         engine.save_to_file(text, tmp_path)

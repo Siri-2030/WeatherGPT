@@ -1,118 +1,95 @@
 # WeatherGPT 🌦️
-### Conversational AI for Weather Forecasting, Alerts & Climate Information
-*Smart India Hackathon — 100% free & open-source stack*
+### Conversational, multilingual AI for weather forecasts, alerts & air quality
 
-## What this is
+WeatherGPT answers weather questions in the user's own language (English, Hindi,
+Telugu, Tamil, …) using **real numerical-weather-prediction (NWP) data** — no
+paid APIs and no HPC cluster. Type or speak a question; get a plain-language
+answer, a map, alert badges, charts and an optional spoken reply.
 
-A working, deployable reference implementation of the WeatherGPT problem
-statement: a multilingual conversational AI that answers weather questions
-using **real NWP (numerical weather prediction) data** — no paid APIs, no
-HPC cluster required.
+## Features
+
+| Area | What it does |
+|---|---|
+| 💬 Chat | Natural-language questions, **follow-ups remembered** ("and tomorrow?") |
+| 🌍 Locations | Worldwide geocoding; understands "City", "City, State" and local spellings |
+| 🌐 Multilingual | The LLM replies in the language the user wrote in (English + 10 Indian languages) |
+| 🎙️ Voice | Browser mic → Whisper / Google Web Speech → answer → gTTS spoken reply |
+| 🎭 Personas | General public · Agriculture · Disaster management · Aviation · Marine · Researcher |
+| 🚨 Alerts | Rule-based: high wind, thunderstorm (CAPE), heavy rain, **heat wave, poor air quality** |
+| 🫁 Air quality | US AQI, PM2.5, PM10, ozone, CO (Open-Meteo Air Quality) |
+| 🗺️ Map | Folium map with live conditions popup and alert zones |
+| 📊 Dashboard | Metrics, 24-hour and 7-day charts, daily table |
+| 🛡️ Resilient | Voice failure ⇒ text chat keeps working · Groq → Gemini automatic LLM fallback · Render cold-start handling |
 
 ## Architecture
 
 ```
-[ User Prompt ]
-      │
-      ▼
-[ Streamlit Chat UI ]  (app.py)
-      │  HTTP POST /chat
-      ▼
-[ FastAPI Backend Router ]  (main.py)
-      │
-      ▼
-[ LLM Orchestrator ]  (llm_router.py)
-      │  1. classify_intent() -> location + horizon
-      │  2. fetch_nwp_data()
-      ▼
-[ Geocoder + NWP Data Ingestor ]  (wrf_simulator.py)
-      │  OpenStreetMap Nominatim (geocoding)
-      │  Open-Meteo GFS API (real NOAA GFS model output)
-      ▼
-[ Structured JSON ]
-      │
-      ▼
-[ Multilingual Persona Prompt ]  (prompts.py)
-      │
-      ▼
-[ Gemini free tier / local Ollama LLM ]  ──>  Final Answer
+User (text / voice)
+   │
+   ▼
+Streamlit UI ─────────── app.py, voice_engine.py
+   │  POST /chat  (message + recent history)
+   ▼
+FastAPI backend ──────── main.py        (/health, /weather, /chat, /docs)
+   │
+   ▼
+LLM router ───────────── llm_router.py
+   │ 1. LLM → {location, forecast_days}          (Groq → Gemini fallback)
+   │ 2. wrf_simulator.fetch_nwp_data()           (geocode + NWP + air quality + alerts)
+   │ 3. prompts.build_final_prompt()             (persona + live JSON + history)
+   │ 4. LLM → final answer in the user's language
+   ▼
+Answer + map + alerts + charts + voice
 ```
 
-## Why "wrf_simulator.py" doesn't run actual WRF
+### Why `wrf_simulator.py` doesn't run real WRF
+WRF needs compiled Fortran/MPI code and HPC hardware. Instead, the module uses the
+**Open-Meteo GFS API**, which serves NOAA GFS model output as JSON. The structure is
+ready for a real WRF/NetCDF source (see `HPC-UPGRADE-PATH` in the file): only
+`fetch_nwp_data()` would change.
 
-Running the real WRF model requires compiling Fortran/MPI code and executing
-it on an HPC cluster — this is not available on free-tier hosting (Hugging
-Face Spaces / Render). Instead, `wrf_simulator.py` uses the **Open-Meteo GFS
-API**, which serves the same underlying NOAA GFS numerical model output
-(plus regional models like HRRR/ICON where available) as ready-to-use JSON —
-giving WeatherGPT genuine NWP data at zero cost and sub-second latency. The
-module is structured so a real WRF/NetCDF pipeline can be dropped in later
-without touching the LLM or UI layers (see the `HPC-UPGRADE-PATH` comments
-inside the file).
+## Project layout
 
-## Files
+| File | Purpose |
+|---|---|
+| `app.py` | Streamlit UI: chat, voice, map, dashboard |
+| `voice_engine.py` | Speech-to-text and text-to-speech with graceful fallbacks |
+| `main.py` | FastAPI backend |
+| `llm_router.py` | Intent extraction, LLM selection/fallback, answer generation |
+| `prompts.py` | Persona + multilingual system prompts |
+| `wrf_simulator.py` | Geocoding, NWP ingestion, air quality, alerts |
+| `requirements-backend.txt` / `requirements-frontend.txt` | Separate dependency sets (`requirements.txt` = both, for local dev) |
+| `Dockerfile`, `Dockerfile.frontend`, `docker-compose.yml` | Containers |
+| `tests/test_offline.py` | 20+ offline tests (no network/keys needed) |
+| `smoke_test.py` | End-to-end check of a running backend |
+| `DEPLOYMENT.md` | Run locally, Docker, Render, troubleshooting |
+| `DEMO_GUIDE.md` | Demo script + interview Q&A |
 
-| File                  | Purpose                                              |
-|------------------------|-------------------------------------------------------|
-| `wrf_simulator.py`     | Geocoding + live NWP data ingestion (Open-Meteo GFS)  |
-| `llm_router.py`        | Intent extraction, tool-calling, LLM orchestration    |
-| `prompts.py`           | Multilingual, persona-specific system prompts         |
-| `main.py`              | FastAPI backend (`/chat`, `/weather`, `/health`)      |
-| `app.py`               | Streamlit chat UI, map, alert badges, voice search    |
-| `voice_engine.py`      | Module 8: STT (Whisper/SpeechRecognition) + TTS (gTTS/pyttsx3) |
-| `Dockerfile`           | Backend container build                               |
-| `Dockerfile.frontend`  | Frontend container build                              |
-| `docker-compose.yml`   | Runs both services together                           |
-| `DEPLOYMENT.md`        | Step-by-step free deployment (HF Spaces / Render)      |
+## Quick start (VS Code, Windows)
 
-## Quickstart
-
-```bash
+```powershell
+python -m venv .venv
+.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
-cp .env.example .env   # add your free GOOGLE_API_KEY
-uvicorn main:app --reload --port 8000 &
+copy .env.example .env        # then paste your GROQ_API_KEY (and GOOGLE_API_KEY)
+
+# Terminal 1 - backend
+uvicorn main:app --reload --port 8000
+# Terminal 2 - frontend
 streamlit run app.py
 ```
+Open http://localhost:8501 (API docs at http://localhost:8000/docs).
+Full instructions, Docker and Render steps: see **DEPLOYMENT.md**.
 
-See `DEPLOYMENT.md` for full local, Docker, and free-cloud deployment steps.
+## Tests
+```powershell
+python -m unittest discover -s tests -v
+python smoke_test.py            # backend must be running
+```
 
-## Use cases covered
+## Data sources (all free)
+Open-Meteo Forecast (NOAA GFS) · Open-Meteo Geocoding · Open-Meteo Air Quality ·
+Groq / Google Gemini / Ollama (LLM) · Whisper / Google Web Speech (STT) · gTTS (TTS).
 
-- 🌾 Agricultural advisories (soil moisture, irrigation timing)
-- 🚨 Disaster/flood/cyclone early warnings (rule-based alerts on live CAPE,
-  wind gust, and precipitation thresholds)
-- ✈️ Aviation weather briefings
-- ⛵ Marine/coastal safety
-- 🔬 Climate/research-oriented raw data views
-- 🙂 General public forecasts, in English + 10 Indian languages
-
-## Module 8: Voice Interaction & Audio Processing
-
-- **Speech-to-Text**: browser mic capture (`streamlit-mic-recorder`, falling
-  back to Streamlit's native `st.audio_input`) -> local **Whisper**
-  (`tiny`/`base` model, runs on CPU, auto-detects language) -> free/keyless
-  `SpeechRecognition` (Google Web Speech) as a second fallback.
-- **Text-to-Speech**: **gTTS** (free, no API key, best Indian-language
-  coverage) as primary, **pyttsx3** (fully offline) as fallback.
-- Supports English, Hindi, Tamil, Telugu, Marathi, Bengali, Kannada, Gujarati
-  for both directions.
-- Every voice function returns `(result, error)` and never crashes the app —
-  on any failure it degrades gracefully to text-only chat with a visible
-  error message (see `voice_engine.py`).
-- Requires the `ffmpeg` system binary (already included in the Docker
-  images; install locally via `apt-get install ffmpeg` / `brew install ffmpeg`).
-
-## Known limitations (be upfront with judges)
-
-- Not running an actual compiled WRF simulation (see explanation above) —
-  data is real NOAA GFS model output via Open-Meteo, not a locally-run
-  mesoscale downscale.
-- Whisper's `base` model on free-tier CPU hosting (HF Spaces/Render free tier)
-  can take a few seconds per transcription — fine for a live demo, but not
-  production-grade low-latency. Use `tiny` for faster/less-accurate, `small`
-  for slower/more-accurate if your host has more CPU.
-- gTTS requires outbound internet access (it's free but not offline); the
-  pyttsx3 fallback works offline but has weaker Indian-language voice support
-  depending on the OS's installed voices.
-- Alert thresholds are simplified heuristics for demo purposes, not official
-  IMD warnings — clearly disclosed in the LLM's disaster-persona prompt.
+> ⚠️ Alerts are simplified demo thresholds, **not** official warnings. Follow IMD
+> advisories in a real emergency.

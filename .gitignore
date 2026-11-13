@@ -1,22 +1,26 @@
+# Secrets - NEVER commit
+.env
+
+# Python / virtualenvs
 .venv/
+venv/
 __pycache__/
 *.py[cod]
-.env
+.pytest_cache/
+
+# Caches & generated files
 *.sqlite
 *.sqlite3
+.weathergpt_cache*
+weathergpt_http_cache*
 test_audio.wav
 *.mp3
 *.wav
 *.webm
 *.ogg
 *.log
-.pytest_cache/
 .DS_Store
 
-# Local backup copies
-wrf_simulator_backup.py
-wrf_simulator_before_date_fix.py
-wrf_simulator_before_timezone_fix.py
-
-wrf_simulator_before_geocoding_fix.py
-.weathergpt_cache/
+# Local backup copies of source files
+*_backup.py
+*_before_*.py

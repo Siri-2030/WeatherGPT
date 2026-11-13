@@ -1,37 +1,34 @@
 # ==============================================================================
 # WeatherGPT - Frontend (Streamlit) Dockerfile
 # ==============================================================================
-
 FROM python:3.11-slim
 
 WORKDIR /app
 
-# FFmpeg is required by Whisper and pydub
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    gcc \
-    ffmpeg \
+# ffmpeg is required by pydub (browser webm/ogg audio -> wav for speech-to-text)
+RUN apt-get update && apt-get install -y --no-install-recommends gcc ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Python dependencies system-wide so the non-root app user
-# can execute Streamlit and import all packages.
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+COPY requirements-frontend.txt .
+RUN pip install --no-cache-dir --upgrade pip \
+    && pip install --no-cache-dir -r requirements-frontend.txt
 
-# Copy application files
+# BUILD-TIME SANITY CHECK: fail the build (not the live app) if PyArrow or the
+# mic component is missing/broken. This is the exact import Streamlit performs
+# before it renders any custom component.
+RUN python -c "import pyarrow, streamlit; from streamlit.components.v1 import component_arrow; import streamlit_mic_recorder; print('OK pyarrow', pyarrow.__version__, '| streamlit', streamlit.__version__)"
+
 COPY app.py voice_engine.py ./
 COPY .streamlit ./.streamlit
 
-# Create non-root application user
-RUN useradd --create-home --shell /bin/bash appuser \
-    && chown -R appuser:appuser /app
-
+RUN useradd --create-home --shell /bin/bash appuser && chown -R appuser:appuser /app
 USER appuser
 
-ENV PYTHONUNBUFFERED=1
-
+ENV PYTHONUNBUFFERED=1 \
+    PORT=8501
 EXPOSE 8501
 
-HEALTHCHECK --interval=30s --timeout=5s --start-period=10s \
-    CMD python -c "import requests; requests.get('http://localhost:8501/_stcore/health').raise_for_status()" || exit 1
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s \
+    CMD python -c "import os,requests; requests.get('http://localhost:%s/_stcore/health' % os.getenv('PORT','8501'), timeout=4).raise_for_status()" || exit 1
 
-CMD ["streamlit", "run", "app.py", "--server.port=8501", "--server.address=0.0.0.0"]
+CMD ["sh", "-c", "streamlit run app.py --server.port=${PORT:-8501} --server.address=0.0.0.0"]

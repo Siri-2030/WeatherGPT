@@ -1,0 +1,13 @@
+.venv/
+venv/
+.git/
+__pycache__/
+*.pyc
+.env
+*.sqlite
+*.wav
+*.mp3
+tests/
+*.md
+*_backup.py
+*_before_*.py

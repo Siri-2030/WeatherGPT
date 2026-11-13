@@ -1,0 +1,29 @@
+# ==============================================================================
+# WeatherGPT - FRONTEND (Streamlit) requirements -> used by Dockerfile.frontend
+# The frontend only talks to the backend over HTTP, so it does NOT need
+# langchain / fastapi / google libraries. A smaller image builds faster and
+# fits Render's free-tier memory.
+# ==============================================================================
+streamlit==1.39.0
+streamlit-folium==0.23.1
+folium==0.17.0
+streamlit-mic-recorder==0.0.8
+
+# PyArrow is REQUIRED by every Streamlit custom component (the mic recorder and
+# the map are both custom components). It is pinned explicitly so a build can
+# never end up with a missing or binary-incompatible PyArrow.
+pyarrow==17.0.0
+pandas==2.2.3
+numpy==1.26.4
+requests==2.32.3
+
+# --- Voice (100% free) -------------------------------------------------------
+SpeechRecognition==3.10.4   # STT fallback (free Google Web Speech)
+gTTS==2.5.3                 # TTS (primary)
+pyttsx3==2.90               # TTS offline fallback (needs OS voices)
+pydub==0.25.1               # webm/ogg -> wav (needs the ffmpeg binary)
+
+# Optional, LOCAL ONLY (heavy: pulls PyTorch, ~2 GB). Do not use on Render free:
+#   pip install openai-whisper==20240930
+# FFmpeg binary:  Debian/Ubuntu `apt-get install ffmpeg` | macOS `brew install ffmpeg`
+#                 Windows `winget install Gyan.FFmpeg`  (restart VS Code afterwards)

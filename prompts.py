@@ -19,7 +19,7 @@ Design notes:
 from __future__ import annotations
 
 import json
-from typing import Any
+from typing import Any, Optional
 
 SUPPORTED_LANGUAGES = [
     "English", "Hindi", "Tamil", "Telugu", "Marathi",
@@ -30,10 +30,11 @@ SUPPORTED_LANGUAGES = [
 # Base / shared instructions applied to every persona
 # ------------------------------------------------------------------------------
 BASE_INSTRUCTIONS = f"""
-You are WeatherGPT, an AI weather assistant built for the Smart India Hackathon.
-You provide accurate, actionable weather intelligence to Indian citizens using
-REAL numerical weather prediction (NWP) model data (sourced from NOAA GFS via
-the Open-Meteo API) that will be provided to you as structured JSON.
+You are WeatherGPT, a conversational AI weather assistant.
+You provide accurate, actionable weather intelligence (with a focus on Indian
+users, but any location worldwide) using REAL numerical weather prediction (NWP)
+model data (sourced from NOAA GFS via the Open-Meteo API) that will be provided
+to you as structured JSON.
 
 CRITICAL RULES:
 1. Base every factual claim (temperature, rain, wind, alerts) ONLY on the JSON
@@ -49,6 +50,19 @@ CRITICAL RULES:
    beyond 7 days), say so honestly rather than guessing.
 6. Never claim to be running a live WRF simulation -- describe the data source
    as "numerical weather model data" if asked directly.
+7. All times in the JSON are in the LOCATION'S local timezone (see the
+   "timezone" and "local_time" fields) unless a field name ends in "_utc".
+   Quote times in local time.
+8. The JSON may include "air_quality" (US AQI + category) and
+   "current.weather_description". Mention air quality when it is Unhealthy or
+   when the user asks about pollution, masks, or outdoor exercise.
+9. A null value means the model had no data for that field -- say it is
+   unavailable instead of guessing.
+10. "requested_forecast_days" tells you how far ahead the user asked about.
+   Answer for THAT horizon; do not dump all 7 days unless they ask for a weekly
+   outlook.
+11. Use the earlier conversation turns (if any) to resolve follow-ups such as
+   "and tomorrow?" or "what about the evening?".
 """
 
 # ------------------------------------------------------------------------------
@@ -137,6 +151,7 @@ def build_final_prompt(
     user_query: str,
     nwp_data: dict[str, Any],
     persona: str = "general",
+    history: Optional[list[dict[str, str]]] = None,
 ) -> list[dict[str, str]]:
     """
     Assemble the final message list (system + user) sent to the LLM.
@@ -153,7 +168,15 @@ def build_final_prompt(
 USER QUESTION:
 {user_query}
 """
-    return [
-        {"role": "system", "content": system_prompt},
-        {"role": "user", "content": user_content},
-    ]
+    messages: list[dict[str, str]] = [{"role": "system", "content": system_prompt}]
+
+    # Earlier turns (text only -- the fresh data block is attached to the LAST
+    # user message so the model never answers from stale numbers).
+    for turn in (history or [])[-6:]:
+        role = turn.get("role")
+        content = (turn.get("content") or "").strip()
+        if role in ("user", "assistant") and content:
+            messages.append({"role": role, "content": content[:1500]})
+
+    messages.append({"role": "user", "content": user_content})
+    return messages
